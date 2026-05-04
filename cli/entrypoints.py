@@ -623,6 +623,7 @@ def cli() -> None:
         vertex_cli = _vertex_cli_bin()
         node_bin = _node_bin()
         if vertex_cli.is_file() and node_bin:
+            _ensure_vendor_npm_deps(vertex_cli)
             proc = subprocess.run([node_bin, str(vertex_cli), *sys.argv[1:]])
             sys.exit(proc.returncode)
         else:
