@@ -142,7 +142,10 @@ def _run_auth_wizard_if_needed() -> None:
         return
     from cli.setup_wizard import run_login_wizard
 
-    run_login_wizard()
+    if not run_login_wizard():
+        print(f"{YELLOW}Autenticacao necessaria para usar o Vertex.{RESET}")
+        print("Rode: vertex auth login")
+        sys.exit(1)
 
 
 def _ensure_remote_account_active() -> None:
