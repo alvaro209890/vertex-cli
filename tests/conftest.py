@@ -6,7 +6,11 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from config.settings import Settings
+
+try:
+    from config.settings import Settings
+except ModuleNotFoundError:
+    Settings = None
 
 # Set mock environment BEFORE any imports that use Settings
 os.environ.setdefault("MODEL", "deepseek/deepseek-v4-flash")
@@ -15,12 +19,15 @@ os.environ["PTB_TIMEDELTA"] = "1"
 # (tests expect endpoints to be unauthenticated by default)
 os.environ["ANTHROPIC_AUTH_TOKEN"] = ""
 
-Settings.model_config = {**Settings.model_config, "env_file": None}
+if Settings is not None:
+    Settings.model_config = {**Settings.model_config, "env_file": None}
 
 
 @pytest.fixture(autouse=True)
 def _isolate_from_dotenv(monkeypatch):
     """Prevent Pydantic BaseSettings from reading the .env file during tests."""
+    if Settings is None:
+        return
     monkeypatch.setattr(
         Settings, "model_config", {**Settings.model_config, "env_file": None}
     )

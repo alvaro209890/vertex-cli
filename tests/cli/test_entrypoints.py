@@ -290,6 +290,13 @@ def test_cli_overwrites_stale_openclaude_settings(tmp_path: Path) -> None:
     assert env["ANTHROPIC_AUTH_TOKEN"] == "freecc"
     assert env["DISABLE_LOGIN_COMMAND"] == "1"
 
+    settings = json.loads(settings_file.read_text(encoding="utf-8"))
+    assert settings["env"]["ANTHROPIC_BASE_URL"] == entrypoints.VERTEX_API_URL
+    assert settings["env"]["ANTHROPIC_AUTH_TOKEN"] == "freecc"
+    assert settings["env"]["DISABLE_LOGIN_COMMAND"] == "1"
+    assert "OPENAI_API_KEY" not in settings["env"]
+    assert "provider" not in settings
+
 
 def test_start_proxy_reuses_matching_running_proxy() -> None:
     """A matching proxy version is reused."""
@@ -554,6 +561,43 @@ def test_remote_account_check_exits_on_explicit_account_block() -> None:
         entrypoints._ensure_remote_account_active()
 
     exit_.assert_called_once_with(1)
+
+
+def test_remote_account_check_exits_on_structured_account_block() -> None:
+    """Structured backend block payloads should also stop the CLI."""
+    import sys
+
+    from cli import entrypoints
+
+    error = HTTPError(
+        entrypoints.VERTEX_API_URL,
+        403,
+        "Forbidden",
+        {},
+        BytesIO(b'{"detail":{"code":"account_blocked","message":"blocked"}}'),
+    )
+
+    with (
+        patch("vertex_auth.get_valid_token", return_value="test-token"),
+        patch("urllib.request.urlopen", side_effect=error),
+        patch.object(sys, "argv", ["vertex"]),
+        patch("sys.exit", side_effect=SystemExit) as exit_,
+        patch("builtins.print"),
+        suppress(SystemExit),
+    ):
+        entrypoints._ensure_remote_account_active()
+
+    exit_.assert_called_once_with(1)
+
+
+def test_install_script_uses_vertex_cli_repository() -> None:
+    """The public installer must install the vertex-cli repository."""
+    script = (
+        Path(__file__).resolve().parents[2] / "scripts" / "install-vertex.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "github.com/alvaro209890/vertex-cli.git" in script
+    assert "github.com/alvaro209890/Vertex.git" not in script
 
 
 def test_setup_wizard_screen_is_portuguese(tmp_path: Path, capsys) -> None:

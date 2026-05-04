@@ -209,21 +209,26 @@ def _is_account_blocked_response(exc: object) -> bool:
     except json.JSONDecodeError:
         return False
 
-    if not isinstance(data, dict):
+    return _contains_account_block_marker(data)
+
+
+def _contains_account_block_marker(value: object) -> bool:
+    """Return True when a response payload explicitly identifies account block."""
+    if isinstance(value, str):
+        normalized = value.lower()
+        return "conta bloqueada" in normalized or "account blocked" in normalized
+
+    if not isinstance(value, dict):
         return False
 
-    code = str(data.get("code") or data.get("error_code") or "").lower()
+    code = str(value.get("code") or value.get("error_code") or "").lower()
     if code in {"account_blocked", "user_blocked"}:
         return True
 
-    for key in ("error", "detail", "message"):
-        value = data.get(key)
-        if isinstance(value, str):
-            normalized = value.lower()
-            if "conta bloqueada" in normalized or "account blocked" in normalized:
-                return True
-
-    return False
+    return any(
+        _contains_account_block_marker(value.get(key))
+        for key in ("error", "detail", "message")
+    )
 
 
 def _is_auth_login_request(argv: list[str] | None = None) -> bool:
@@ -350,7 +355,35 @@ def _managed_vertex_cli_env(port: str) -> dict[str, str]:
     return env
 
 
-def _ensure_vertex_cli_settings(port: str) -> None:
+def _remote_vertex_cli_env() -> dict[str, str]:
+    """Return environment values that force the vendored CLI through remote Vertex."""
+    import json
+
+    models = _configured_model_values()
+    env = {
+        "ANTHROPIC_BASE_URL": VERTEX_API_URL,
+        "ANTHROPIC_AUTH_TOKEN": "freecc",
+        "DISABLE_LOGIN_COMMAND": "1",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": models["opus"],
+        "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": _display_model_name(models["opus"]),
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": models["sonnet"],
+        "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": _display_model_name(models["sonnet"]),
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": models["haiku"],
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": _display_model_name(models["haiku"]),
+    }
+
+    unique_models: list[str] = []
+    for m in (models["opus"], models["sonnet"], models["haiku"], models["default"]):
+        if m and m not in unique_models:
+            unique_models.append(m)
+    for known in ("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"):
+        if known not in unique_models:
+            unique_models.append(known)
+    env["OPENCLAUDE_EXTRA_MODEL_OPTIONS"] = json.dumps(unique_models)
+    return env
+
+
+def _ensure_vertex_cli_settings(env_updates: dict[str, str]) -> None:
     """Create/update Vertex CLI settings owned by this wrapper."""
     import json
 
@@ -380,7 +413,7 @@ def _ensure_vertex_cli_settings(port: str) -> None:
         "OPENAI_MODEL",
     ):
         env.pop(key, None)
-    env.update(_managed_vertex_cli_env(port))
+    env.update(env_updates)
     models = _configured_model_values()
     settings.update(
         {
@@ -673,40 +706,17 @@ def cli() -> None:
     if _is_local_proxy_requested():
         # ─── Modo local (proxy na máquina do usuário) ───
         port = os.environ.get("VERTEX_PORT", "8083")
-        _ensure_vertex_cli_settings(port)
+        local_env = _managed_vertex_cli_env(port)
+        _ensure_vertex_cli_settings(local_env)
         _start_proxy()
-        env.update(_managed_vertex_cli_env(port))
+        env.update(local_env)
         env["VERTEX_DASHBOARD_URL"] = f"http://localhost:{port}/dashboard"
     else:
         # ─── Modo remoto (padrão) ───
-        import json
-
         print("Conectando ao servidor Vertex...")
-        env["ANTHROPIC_BASE_URL"] = VERTEX_API_URL
-        env["ANTHROPIC_AUTH_TOKEN"] = "freecc"
-        env["DISABLE_LOGIN_COMMAND"] = "1"
-
-        # Modelos remotos (o servidor faz o roteamento)
-        models = _configured_model_values()
-        env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = models["opus"]
-        env["ANTHROPIC_DEFAULT_OPUS_MODEL_NAME"] = _display_model_name(models["opus"])
-        env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = models["sonnet"]
-        env["ANTHROPIC_DEFAULT_SONNET_MODEL_NAME"] = _display_model_name(
-            models["sonnet"]
-        )
-        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = models["haiku"]
-        env["ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME"] = _display_model_name(models["haiku"])
-
-        # Modelos disponíveis no picker
-        unique_models: list[str] = []
-        for m in (models["opus"], models["sonnet"], models["haiku"], models["default"]):
-            if m and m not in unique_models:
-                unique_models.append(m)
-        for known in ("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"):
-            if known not in unique_models:
-                unique_models.append(known)
-        env["OPENCLAUDE_EXTRA_MODEL_OPTIONS"] = json.dumps(unique_models)
-
+        remote_env = _remote_vertex_cli_env()
+        _ensure_vertex_cli_settings(remote_env)
+        env.update(remote_env)
         env["VERTEX_DASHBOARD_URL"] = VERTEX_API_URL
 
     # Set NODE_OPTIONS memory limit when not user-overridden
