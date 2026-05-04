@@ -4,13 +4,33 @@ CLI para conectar ao proxy Vertex remoto.
 
 ## Instalação
 
-```bash
-pipx install git+https://github.com/alvaro209890/vertex-cli.git
-```
+Instalação recomendada em Linux:
 
-Ou via script:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alvaro209890/vertex-cli/main/scripts/install-vertex.sh | bash
+```
+
+Instalação manual via `pipx`:
+
+```bash
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath
+pipx install "git+https://github.com/alvaro209890/vertex-cli.git" --force
+vertex --version
+vertex auth login
+vertex auth status
+```
+
+## Painel do cliente
+
+O painel web mostra os dados da conta autenticada: tokens totais, custo estimado
+em USD/BRL, pico de consumo por hora, uso diario, mix de entrada/saida/cache,
+ultimas chamadas e uso por modelo.
+
+O frontend usa o backend remoto padrao:
+
+```bash
+https://vertex-api.cursar.space
 ```
 
 ## Atualizar em outro Linux
