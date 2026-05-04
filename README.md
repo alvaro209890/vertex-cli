@@ -100,6 +100,10 @@ vertex auth status  # Verificar status da autenticacao
 vertex /logout      # Fazer logout
 ```
 
+No modo remoto, a CLI usa o ID token Firebase da sessao autenticada como
+`ANTHROPIC_AUTH_TOKEN`. Isso permite que o backend aplique bloqueio e saldo por
+usuario nas chamadas `/v1/*`.
+
 ## Modo local (opcional)
 
 ```bash

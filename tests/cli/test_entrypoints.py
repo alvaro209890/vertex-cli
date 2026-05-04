@@ -188,6 +188,9 @@ def test_cli_creates_default_vertex_settings(tmp_path: Path) -> None:
 
     with (
         patch.object(entrypoints, "_run_auth_wizard_if_needed"),
+        patch.object(
+            entrypoints, "_ensure_remote_account_active", return_value="firebase-token"
+        ),
         patch.object(entrypoints, "_node_bin", return_value=str(node_bin)),
         patch.object(entrypoints, "VERTEX_CLI_CONFIG_DIR", settings_file.parent),
         patch.object(entrypoints, "VERTEX_CLI_SETTINGS_FILE", settings_file),
@@ -203,7 +206,7 @@ def test_cli_creates_default_vertex_settings(tmp_path: Path) -> None:
     # Modo remoto padrao: usa VERTEX_API_URL, nao inicia proxy local
     env = run.call_args.kwargs["env"]
     assert env["ANTHROPIC_BASE_URL"] == entrypoints.VERTEX_API_URL
-    assert env["ANTHROPIC_AUTH_TOKEN"] == "freecc"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "firebase-token"
 
 
 def test_cli_local_proxy_mode(tmp_path: Path) -> None:
@@ -272,6 +275,9 @@ def test_cli_overwrites_stale_openclaude_settings(tmp_path: Path) -> None:
 
     with (
         patch.object(entrypoints, "_run_auth_wizard_if_needed"),
+        patch.object(
+            entrypoints, "_ensure_remote_account_active", return_value="firebase-token"
+        ),
         patch.object(entrypoints, "_node_bin", return_value=str(node_bin)),
         patch.object(entrypoints, "VERTEX_CLI_CONFIG_DIR", settings_file.parent),
         patch.object(entrypoints, "VERTEX_CLI_SETTINGS_FILE", settings_file),
@@ -287,12 +293,12 @@ def test_cli_overwrites_stale_openclaude_settings(tmp_path: Path) -> None:
     # Modo remoto: usa VERTEX_API_URL diretamente nas env vars do subprocess
     env = run.call_args.kwargs["env"]
     assert env["ANTHROPIC_BASE_URL"] == entrypoints.VERTEX_API_URL
-    assert env["ANTHROPIC_AUTH_TOKEN"] == "freecc"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "firebase-token"
     assert env["DISABLE_LOGIN_COMMAND"] == "1"
 
     settings = json.loads(settings_file.read_text(encoding="utf-8"))
     assert settings["env"]["ANTHROPIC_BASE_URL"] == entrypoints.VERTEX_API_URL
-    assert settings["env"]["ANTHROPIC_AUTH_TOKEN"] == "freecc"
+    assert settings["env"]["ANTHROPIC_AUTH_TOKEN"] == "firebase-token"
     assert settings["env"]["DISABLE_LOGIN_COMMAND"] == "1"
     assert "OPENAI_API_KEY" not in settings["env"]
     assert "provider" not in settings
@@ -495,12 +501,14 @@ def test_remote_account_check_uses_cli_user_agent() -> None:
 
     response = MagicMock()
     with (
+        patch.object(entrypoints, "_installed_vertex_version", return_value="1.2.3"),
         patch("vertex_auth.get_valid_token", return_value="test-token"),
         patch("urllib.request.urlopen", return_value=response) as urlopen,
     ):
-        entrypoints._ensure_remote_account_active()
+        token = entrypoints._ensure_remote_account_active()
 
     req = urlopen.call_args.args[0]
+    assert token == "test-token"
     assert req.get_header("User-agent") == "Vertex CLI/1.2.3"
     assert req.get_header("Accept") == "application/json"
     response.close.assert_called_once()
@@ -621,6 +629,9 @@ def test_cli_blocks_anthropic_setup_token() -> None:
     with (
         patch.object(sys, "argv", ["vertex", "setup-token"]),
         patch.object(entrypoints, "_run_auth_wizard_if_needed"),
+        patch.object(
+            entrypoints, "_ensure_remote_account_active", return_value="firebase-token"
+        ),
         patch.object(entrypoints, "_start_proxy", return_value=True),
         patch.object(entrypoints, "_node_bin", return_value="/usr/bin/node"),
         patch.object(entrypoints, "_ensure_vertex_cli_settings"),

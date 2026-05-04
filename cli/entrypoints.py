@@ -148,13 +148,13 @@ def _run_auth_wizard_if_needed() -> None:
         sys.exit(1)
 
 
-def _ensure_remote_account_active() -> None:
+def _ensure_remote_account_active() -> str | None:
     """Confirm the hosted dashboard API still accepts this Firebase account."""
     from vertex_auth import clear_auth, get_valid_token
 
     token = get_valid_token()
     if not token:
-        return
+        return None
 
     import urllib.error
     import urllib.request
@@ -189,6 +189,7 @@ def _ensure_remote_account_active() -> None:
         print(
             f"{YELLOW}Aviso: nao foi possivel confirmar o status da conta agora.{RESET}"
         )
+    return token
 
 
 def _is_account_blocked_response(exc: object) -> bool:
@@ -355,14 +356,14 @@ def _managed_vertex_cli_env(port: str) -> dict[str, str]:
     return env
 
 
-def _remote_vertex_cli_env() -> dict[str, str]:
+def _remote_vertex_cli_env(auth_token: str) -> dict[str, str]:
     """Return environment values that force the vendored CLI through remote Vertex."""
     import json
 
     models = _configured_model_values()
     env = {
         "ANTHROPIC_BASE_URL": VERTEX_API_URL,
-        "ANTHROPIC_AUTH_TOKEN": "freecc",
+        "ANTHROPIC_AUTH_TOKEN": auth_token,
         "DISABLE_LOGIN_COMMAND": "1",
         "ANTHROPIC_DEFAULT_OPUS_MODEL": models["opus"],
         "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": _display_model_name(models["opus"]),
@@ -688,7 +689,7 @@ def cli() -> None:
 
     # Verifica autenticacao
     _run_auth_wizard_if_needed()
-    _ensure_remote_account_active()
+    remote_auth_token = _ensure_remote_account_active()
 
     # Decide modo: remoto (padrão) vs local
     env = os.environ.copy()
@@ -714,7 +715,13 @@ def cli() -> None:
     else:
         # ─── Modo remoto (padrão) ───
         print("Conectando ao servidor Vertex...")
-        remote_env = _remote_vertex_cli_env()
+        if not remote_auth_token:
+            print(
+                f"{YELLOW}Sessao expirada. Faca login novamente com "
+                f"`vertex auth login`.{RESET}"
+            )
+            sys.exit(1)
+        remote_env = _remote_vertex_cli_env(remote_auth_token)
         _ensure_vertex_cli_settings(remote_env)
         env.update(remote_env)
         env["VERTEX_DASHBOARD_URL"] = VERTEX_API_URL
