@@ -2,8 +2,10 @@
 
 import os
 from contextlib import suppress
+from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 
 def _run_init(tmp_home: Path) -> tuple[str, Path]:
@@ -478,6 +480,80 @@ def test_cli_auth_status_reports_authenticated(tmp_path: Path) -> None:
     run.assert_not_called()
     output = "\n".join(printed)
     assert "Autenticado como user@example.com" in output
+
+
+def test_remote_account_check_uses_cli_user_agent() -> None:
+    """Remote status checks should avoid Cloudflare blocking urllib defaults."""
+    from cli import entrypoints
+
+    response = MagicMock()
+    with (
+        patch("vertex_auth.get_valid_token", return_value="test-token"),
+        patch("urllib.request.urlopen", return_value=response) as urlopen,
+    ):
+        entrypoints._ensure_remote_account_active()
+
+    req = urlopen.call_args.args[0]
+    assert req.get_header("User-agent") == "Vertex CLI/1.2.2"
+    assert req.get_header("Accept") == "application/json"
+    response.close.assert_called_once()
+
+
+def test_remote_account_check_ignores_non_account_403() -> None:
+    """A Cloudflare/WAF 403 must not be reported as a blocked account."""
+    from cli import entrypoints
+
+    printed: list[str] = []
+    error = HTTPError(
+        entrypoints.VERTEX_API_URL,
+        403,
+        "Forbidden",
+        {},
+        BytesIO(b"error code: 1010"),
+    )
+
+    with (
+        patch("vertex_auth.get_valid_token", return_value="test-token"),
+        patch("urllib.request.urlopen", side_effect=error),
+        patch("sys.exit", side_effect=AssertionError("should not exit")) as exit_,
+        patch(
+            "builtins.print",
+            side_effect=lambda *a: printed.append(" ".join(str(x) for x in a)),
+        ),
+    ):
+        entrypoints._ensure_remote_account_active()
+
+    exit_.assert_not_called()
+    assert "Aviso: nao foi possivel confirmar o status da conta (403)." in "\n".join(
+        printed
+    )
+
+
+def test_remote_account_check_exits_on_explicit_account_block() -> None:
+    """Explicit backend account blocks still stop the CLI."""
+    import sys
+
+    from cli import entrypoints
+
+    error = HTTPError(
+        entrypoints.VERTEX_API_URL,
+        403,
+        "Forbidden",
+        {},
+        BytesIO(b'{"error":"Conta bloqueada"}'),
+    )
+
+    with (
+        patch("vertex_auth.get_valid_token", return_value="test-token"),
+        patch("urllib.request.urlopen", side_effect=error),
+        patch.object(sys, "argv", ["vertex"]),
+        patch("sys.exit", side_effect=SystemExit) as exit_,
+        patch("builtins.print"),
+        suppress(SystemExit),
+    ):
+        entrypoints._ensure_remote_account_active()
+
+    exit_.assert_called_once_with(1)
 
 
 def test_setup_wizard_screen_is_portuguese(tmp_path: Path, capsys) -> None:

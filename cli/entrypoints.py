@@ -14,7 +14,7 @@ VERTEX_CLI_CONFIG_DIR = Path.home() / ".vertex"
 VERTEX_CLI_SETTINGS_FILE = VERTEX_CLI_CONFIG_DIR / "settings.json"
 DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
 DEEPSEEK_ONLY_DEFAULT_MODEL = DEFAULT_MODEL
-PACKAGE_NAME = "vertex-deepseek"
+PACKAGE_NAME = "vertex-cli"
 MANAGED_VERTEX_CLI_ENV_BASE = {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:{port}",
     "ANTHROPIC_AUTH_TOKEN": "freecc",
@@ -161,13 +161,17 @@ def _ensure_remote_account_active() -> None:
 
     req = urllib.request.Request(
         f"{VERTEX_API_URL}/me",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": f"Vertex CLI/{_installed_vertex_version()}",
+        },
         method="GET",
     )
     try:
         urllib.request.urlopen(req, timeout=10).close()
     except urllib.error.HTTPError as exc:
-        if exc.code == 403:
+        if exc.code == 403 and _is_account_blocked_response(exc):
             print(
                 f"{RED}Conta bloqueada. Fale com o suporte para reativar o acesso.{RESET}"
             )
@@ -185,6 +189,41 @@ def _ensure_remote_account_active() -> None:
         print(
             f"{YELLOW}Aviso: nao foi possivel confirmar o status da conta agora.{RESET}"
         )
+
+
+def _is_account_blocked_response(exc: object) -> bool:
+    """Return whether a 403 response explicitly says the account is blocked."""
+    import json
+
+    read = getattr(exc, "read", None)
+    if not callable(read):
+        return False
+
+    try:
+        raw = read(4096).decode("utf-8", "replace")
+    except Exception:
+        return False
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+
+    if not isinstance(data, dict):
+        return False
+
+    code = str(data.get("code") or data.get("error_code") or "").lower()
+    if code in {"account_blocked", "user_blocked"}:
+        return True
+
+    for key in ("error", "detail", "message"):
+        value = data.get(key)
+        if isinstance(value, str):
+            normalized = value.lower()
+            if "conta bloqueada" in normalized or "account blocked" in normalized:
+                return True
+
+    return False
 
 
 def _is_auth_login_request(argv: list[str] | None = None) -> bool:
