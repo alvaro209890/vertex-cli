@@ -538,6 +538,29 @@ def _record_usage_to_api(model: str, tokens: int) -> None:
         urllib.request.urlopen(req, timeout=5)
 
 
+def _ensure_vendor_npm_deps(vertex_bin: Path) -> None:
+    """Run npm install in the vendor directory if node_modules is missing."""
+    vendor_dir = vertex_bin.parents[1]
+    node_modules = vendor_dir / "node_modules"
+    if node_modules.is_dir():
+        return
+    package_json = vendor_dir / "package.json"
+    if not package_json.is_file():
+        return
+    import subprocess
+
+    print("Instalando dependencias do Vertex CLI...")
+    try:
+        subprocess.run(
+            ["npm", "install", "--production", "--silent"],
+            cwd=str(vendor_dir),
+            capture_output=True,
+            timeout=120,
+        )
+    except Exception:
+        print("Aviso: falha ao instalar dependencias Node.js.")
+
+
 def _is_local_proxy_requested() -> bool:
     """Return True when the user explicitly requests the local proxy mode."""
     return os.environ.get("VERTEX_LOCAL_PROXY") == "true"
@@ -583,6 +606,9 @@ def cli() -> None:
         print("Error: Node.js is required to run the Vertex CLI runtime.")
         print("Install Node.js 20+ and run vertex again.")
         sys.exit(1)
+
+    # Garante que as dependencias Node.js do vendor estao instaladas
+    _ensure_vendor_npm_deps(vertex_cli)
 
     # Verifica autenticacao
     _run_auth_wizard_if_needed()
@@ -664,10 +690,10 @@ def serve() -> None:
         return
 
     try:
-        from cli.process_registry import kill_all_best_effort
+        import uvicorn
         from config.settings import get_settings
 
-        import uvicorn
+        from cli.process_registry import kill_all_best_effort
     except ImportError:
         print(
             "Erro: O modo servidor requer dependencias adicionais.\n"

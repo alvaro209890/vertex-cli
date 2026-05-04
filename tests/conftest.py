@@ -6,7 +6,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from config.settings import Settings
 
 # Set mock environment BEFORE any imports that use Settings
