@@ -501,7 +501,7 @@ def test_remote_account_check_uses_cli_user_agent() -> None:
         entrypoints._ensure_remote_account_active()
 
     req = urlopen.call_args.args[0]
-    assert req.get_header("User-agent") == "Vertex CLI/1.2.2"
+    assert req.get_header("User-agent") == "Vertex CLI/1.2.3"
     assert req.get_header("Accept") == "application/json"
     response.close.assert_called_once()
 
