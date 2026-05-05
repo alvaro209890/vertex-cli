@@ -539,12 +539,12 @@ def test_update_check_prefers_vertex_api_version() -> None:
     from cli import entrypoints
 
     with (
-        patch.object(entrypoints, "_fetch_latest_version_from_api", return_value="1.2.5"),
+        patch.object(entrypoints, "_fetch_latest_version_from_api", return_value="1.2.6"),
         patch.object(
             entrypoints, "_fetch_latest_version_from_github", return_value="1.2.4"
         ) as github,
     ):
-        assert entrypoints._get_latest_version() == "1.2.5"
+        assert entrypoints._get_latest_version() == "1.2.6"
 
     github.assert_not_called()
 

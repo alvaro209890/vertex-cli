@@ -645,11 +645,11 @@ def _start_proxy() -> bool:
             and health.get("settings_fingerprint") == expected_fingerprint
         ):
             return True
-        print("Restarting Vertex proxy...")
+        print("Reiniciando proxy do Vertex...")
         if _terminate_vertex_proxy_processes():
             _wait_for_proxy_down(port)
     else:
-        print("Starting Vertex proxy...")
+        print("Iniciando proxy do Vertex...")
 
     subprocess.Popen(
         [
@@ -665,7 +665,7 @@ def _start_proxy() -> bool:
     if _wait_for_proxy_health(port, expected_version=expected_version):
         return True
 
-    print(f"Warning: Proxy may not have started on port {port}.")
+    print(f"Aviso: O proxy pode nao ter iniciado na porta {port}.")
     return False
 
 
@@ -979,15 +979,15 @@ def cli() -> None:
 
     vertex_cli = _vertex_cli_bin()
     if not vertex_cli.is_file():
-        print(f"Error: Vertex CLI runtime not found at {vertex_cli}")
+        print(f"Erro: Runtime do Vertex CLI nao encontrado em {vertex_cli}")
         print(
-            "Reinstall Vertex or rebuild the package with vendor/vertex-cli included."
+            "Reinstale o Vertex ou reconstrua o pacote com vendor/vertex-cli incluso."
         )
         sys.exit(1)
     node_bin = _node_bin()
     if node_bin is None:
-        print("Error: Node.js is required to run the Vertex CLI runtime.")
-        print("Install Node.js 20+ and run vertex again.")
+        print("Erro: Node.js e necessario para executar o runtime do Vertex CLI.")
+        print("Instale Node.js 20+ e execute vertex novamente.")
         sys.exit(1)
 
     # Garante que as dependencias Node.js do vendor estao instaladas
@@ -1040,12 +1040,12 @@ def cli() -> None:
         env["NODE_OPTIONS"] = "--max-old-space-size=8192"
 
     # Launch Vertex CLI
-    print("Launching Vertex CLI...")
+    print("Iniciando Vertex CLI...")
     try:
         proc = subprocess.run([node_bin, str(vertex_cli), *sys.argv[1:]], env=env)
         sys.exit(proc.returncode)
     except FileNotFoundError:
-        print(f"Error: Vertex CLI runtime not found at {vertex_cli}")
+        print(f"Erro: Runtime do Vertex CLI nao encontrado em {vertex_cli}")
         sys.exit(1)
 
 

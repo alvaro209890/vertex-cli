@@ -2,7 +2,7 @@
 
 CLI para conectar ao proxy Vertex remoto.
 
-Versao atual: `1.2.5`. Esta versao ja inclui WebSearch, WebFetch e o binario
+Versao atual: `1.2.6`. Esta versao ja inclui WebSearch, WebFetch e o binario
 `rg` empacotado para o Grep funcionar mesmo em maquinas sem ripgrep instalado.
 
 ## Instalação
