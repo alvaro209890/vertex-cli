@@ -22,6 +22,7 @@ MANAGED_VERTEX_CLI_ENV_BASE = {
 }
 
 VERTEX_API_URL = "https://vertex-api.cursar.space"
+VERTEX_WEB_URL = "https://vertex-ad5da.web.app"
 
 
 def _load_env_template() -> str:
@@ -169,7 +170,17 @@ def _ensure_remote_account_active() -> str | None:
         method="GET",
     )
     try:
-        urllib.request.urlopen(req, timeout=10).close()
+        response = urllib.request.urlopen(req, timeout=10)
+        try:
+            payload = _read_json_response(response)
+        finally:
+            response.close()
+        if _contains_insufficient_credits_marker(payload):
+            print(
+                f"{YELLOW}Saldo insuficiente. Recarregue em {VERTEX_WEB_URL} "
+                f"para usar o Vertex.{RESET}"
+            )
+            sys.exit(1)
     except urllib.error.HTTPError as exc:
         if exc.code == 403 and _is_account_blocked_response(exc):
             print(
@@ -190,6 +201,54 @@ def _ensure_remote_account_active() -> str | None:
             f"{YELLOW}Aviso: nao foi possivel confirmar o status da conta agora.{RESET}"
         )
     return token
+
+
+def _read_json_response(response: object) -> object | None:
+    """Read a small JSON response payload, returning None when unavailable."""
+    import json
+
+    read = getattr(response, "read", None)
+    if not callable(read):
+        return None
+
+    try:
+        raw = read(65536)
+    except Exception:
+        return None
+    if not isinstance(raw, bytes) or not raw:
+        return None
+
+    try:
+        return json.loads(raw.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _contains_insufficient_credits_marker(value: object) -> bool:
+    """Return True when account status says the user must recharge."""
+    if isinstance(value, str):
+        normalized = value.lower()
+        return (
+            "saldo insuficiente" in normalized
+            or "sem creditos" in normalized
+            or "insufficient credits" in normalized
+        )
+
+    if not isinstance(value, dict):
+        return False
+
+    credits = value.get("credits")
+    if isinstance(credits, dict) and credits.get("balance") == 0:
+        return True
+
+    code = str(value.get("code") or value.get("error_code") or "").lower()
+    if code in {"insufficient_credits", "no_credits"}:
+        return True
+
+    return any(
+        _contains_insufficient_credits_marker(value.get(key))
+        for key in ("error", "detail", "message")
+    )
 
 
 def _is_account_blocked_response(exc: object) -> bool:

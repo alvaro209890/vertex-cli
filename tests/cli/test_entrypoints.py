@@ -500,6 +500,7 @@ def test_remote_account_check_uses_cli_user_agent() -> None:
     from cli import entrypoints
 
     response = MagicMock()
+    response.read.return_value = b"{}"
     with (
         patch.object(entrypoints, "_installed_vertex_version", return_value="1.2.3"),
         patch("vertex_auth.get_valid_token", return_value="test-token"),
@@ -511,6 +512,35 @@ def test_remote_account_check_uses_cli_user_agent() -> None:
     assert token == "test-token"
     assert req.get_header("User-agent") == "Vertex CLI/1.2.3"
     assert req.get_header("Accept") == "application/json"
+    response.close.assert_called_once()
+
+
+def test_remote_account_check_exits_when_credits_are_empty() -> None:
+    """Remote mode should stop before launching when the account has no balance."""
+    import sys
+
+    from cli import entrypoints
+
+    response = MagicMock()
+    response.read.return_value = b'{"credits":{"balance":0}}'
+    printed: list[str] = []
+
+    with (
+        patch("vertex_auth.get_valid_token", return_value="test-token"),
+        patch("urllib.request.urlopen", return_value=response),
+        patch.object(sys, "argv", ["vertex"]),
+        patch("sys.exit", side_effect=SystemExit) as exit_,
+        patch(
+            "builtins.print",
+            side_effect=lambda *a: printed.append(" ".join(str(x) for x in a)),
+        ),
+        suppress(SystemExit),
+    ):
+        entrypoints._ensure_remote_account_active()
+
+    exit_.assert_called_once_with(1)
+    assert "Saldo insuficiente" in "\n".join(printed)
+    assert entrypoints.VERTEX_WEB_URL in "\n".join(printed)
     response.close.assert_called_once()
 
 
