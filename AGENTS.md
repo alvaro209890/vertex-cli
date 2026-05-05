@@ -1,102 +1,98 @@
-# AGENTIC DIRECTIVE — Vertex CLI
+# AGENTS.md — Vertex CLI
 
-> This file is identical to CLAUDE.md. Keep them in sync.
+> Diretiva para agentes de IA que trabalham neste repositorio.
 
-## PROJECT OVERVIEW
+## VISÃO GERAL
 
-Vertex CLI is the **command-line client** for Vertex — a Python wrapper that
-launches a forked Claude Code CLI (Node.js) pointed at a DeepSeek-backed
-Anthropic-compatible proxy. It connects to the remote server at
-`vertex-api.cursar.space` or optionally runs a local proxy.
+Vertex CLI e o **cliente de linha de comando** do Vertex — um wrapper Python que
+lanca um runtime Node.js empacotado (fork do Claude Code CLI) apontado para um
+proxy compativel com a API Anthropic, usando modelos DeepSeek.
 
-**Key directories:**
-- `cli/` — Entrypoints (`vertex` command), subprocess session management, setup wizard
-- `vertex_auth/` — Firebase Auth REST client (login, token refresh, logout)
-- `vendor/vertex-cli/` — Forked Claude Code CLI runtime (Node.js ~20MB bundle) with PT-BR patches
-- `scripts/` — Install script (`install-vertex.sh`), patch applicator
-- `tests/` — Pytest tests: cli/, contracts/
+**Diretorios principais:**
+- `cli/` — Entrypoints (comando `vertex`), gerenciamento de subprocessos, wizard de login
+- `vertex_auth/` — Cliente REST Firebase Auth (login, refresh, logout)
+- `vendor/vertex-cli/` — Runtime Node.js (~20MB bundle) com patches PT-BR
+- `scripts/` — Script de instalacao (`install-vertex.sh`)
+- `tests/` — Testes pytest: `cli/`, `contracts/`
 
-**What this repo does NOT have** (those are in vertex-server):
-- FastAPI proxy server
-- Messaging bots (Discord/Telegram)
-- Web dashboard or admin panel
-- Database / Supabase
+**O que NAO esta neste repo** (pertence ao vertex-server):
+- Servidor FastAPI do proxy
+- Bots de mensageria (Discord/Telegram)
+- Dashboard web ou painel admin
+- Banco de dados / Supabase
 
-## CODING ENVIRONMENT
+## AMBIENTE DE DESENVOLVIMENTO
 
-- Install astral uv using `curl -LsSf https://astral.sh/uv/install.sh | sh` if not already installed; update to latest if already installed
-- Install Python 3.14 using `uv python install 3.14` if not already installed
-- Always use `uv run` to run files instead of the global `python` command
-- Ruff formatter is set to py314 (supports multiple exception types without parentheses)
-- Read `.env.example` for environment variables
-- All CI checks must pass; failing checks block merge
-- Add tests for new changes (including edge cases), then run `uv run pytest`
-- Run checks in order: `uv run ruff format` → `uv run ruff check` → `uv run ty check` → `uv run pytest`
-- Do not add `# type: ignore` or `# ty: ignore`; fix the underlying type issue
+- Instalar `uv` com `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- Instalar Python 3.14: `uv python install 3.14`
+- Sempre usar `uv run` para executar arquivos
+- Ruff configurado para py314
+- Ler `.env.example` para variaveis de ambiente
+- Adicionar testes para novas funcionalidades
+- Checks em ordem: `uv run ruff format` → `uv run ruff check` → `uv run ty check` → `uv run pytest`
 
-## IDENTITY & CONTEXT
+## IDENTIDADE E CONTEXTO
 
-- You are an expert Software Architect and Systems Engineer.
-- Goal: Zero-defect, root-cause-oriented engineering for bugs; test-driven engineering for new features.
-- Code: Write the simplest code possible. Keep the codebase minimal and modular.
+- Voce e um Arquiteto de Software e Engenheiro de Sistemas especialista.
+- Objetivo: Zero defeitos, engenharia orientada a causa raiz para bugs;
+  desenvolvimento orientado a testes para novas funcionalidades.
+- Codigo: Escreva o codigo mais simples possivel. Mantenha a base de codigo
+  minima e modular.
 
-## PORTUGUESE REQUIRED
+## PT-BR OBRIGATORIO
 
-- All user-facing strings in the bundled CLI (`vendor/vertex-cli/dist/cli.mjs`)
-  must be in Brazilian Portuguese. This includes slash-command descriptions,
-  status/progress messages, error strings, argument hints, work-status labels,
-  and tool descriptions. English equivalents must NOT appear in the patch or the
-  bundle. The canonical patch `patches/vertex-cli-disable-anthropic-login.patch`
-  captures all translations together with the identity and auth customizations.
+- Todas as strings visiveis ao usuario no bundle da CLI (`vendor/vertex-cli/dist/cli.mjs`
+  e `cli.mjs.patched`) devem estar em portugues brasileiro.
+- Isso inclui descricoes de slash-commands, mensagens de status/progresso, erros,
+  hints, labels de work-status e descricoes de ferramentas.
+- Textos em ingles NAO devem aparecer na interface do usuario.
 
-## ARCHITECTURE PRINCIPLES
+## ARQUITETURA
 
-### Module Boundaries
+### Fronteiras entre Modulos
 ```
-cli/entrypoints.py  (entrypoint: parses args, wires env, launches vendored CLI)
-cli/session.py      (CLISession: subprocess lifecycle for Claude CLI)
-cli/manager.py      (CLISessionManager: async pool of sessions)
-cli/process_registry.py  (global PID tracker with atexit cleanup)
-cli/setup_wizard.py      (interactive Firebase login wizard)
-vertex_auth/client.py    (Firebase REST API: signIn, refresh, logout)
+cli/entrypoints.py     → entrypoint: parse de args, configuracao de env, lanca CLI
+cli/session.py         → CLISession: ciclo de vida do subprocesso
+cli/manager.py         → CLISessionManager: pool assincrono de sessoes
+cli/process_registry.py → rastreador global de PIDs com cleanup atexit
+cli/setup_wizard.py    → wizard interativo de login Firebase
+vertex_auth/client.py  → API REST Firebase: signIn, refresh, logout
 ```
 
-### Execution Flow
-1. `vertex` → `entrypoints.py:cli()` detects mode (remote or local proxy)
-2. Checks auth via `vertex_auth` — if no token, runs wizard
-3. Verifies account status via `GET /me` on `vertex-api.cursar.space`
-4. Writes `~/.vertex/settings.json` with model mappings and tokens
-5. Launches `node vendor/vertex-cli/bin/vertex` with env pointing to proxy
+### Fluxo de Execucao
+1. `vertex` → `entrypoints.py:cli()` detecta o modo (remoto ou local)
+2. Verifica auth via `vertex_auth` — sem token, executa wizard
+3. Confirma status da conta via `GET /me` em `vertex-api.cursar.space`
+4. Verifica atualizacoes (API + GitHub, usa a maior versao)
+5. Escreve `~/.vertex/settings.json` com modelos e tokens
+6. Lanca `node vendor/vertex-cli/bin/vertex` com env apontando para o proxy
 
-### Modes
-- **Remote (default):** `ANTHROPIC_BASE_URL=https://vertex-api.cursar.space`
-- **Local:** `VERTEX_LOCAL_PROXY=true` → starts `python -m vertex_proxy` on port 8083
+### Modos
+- **Remoto (padrao):** `ANTHROPIC_BASE_URL=https://vertex-api.cursar.space`
+- **Local:** `VERTEX_LOCAL_PROXY=true` → inicia `python -m vertex_proxy` na porta 8083
 
-### Coding Rules
-- **DRY**: Extract shared logic. Prefer composition over copy-paste.
-- **Encapsulation**: Use accessor methods, not direct `_attribute` assignment.
-- **Dead code**: Remove unused code and hardcoded values. Use settings/config.
-- **No type ignores**: Do not add `# type: ignore`. Fix the underlying type.
-- **Maximum test coverage**: Prefer live smoke tests to catch bugs early.
+### Regras de Codigo
+- **DRY:** Extraia logica compartilhada. Prefira composicao a copy-paste.
+- **Encapsulamento:** Use metodos de acesso, nao atribuicao direta.
+- **Codigo morto:** Remova codigo nao utilizado e valores hardcoded.
+- **Sem type ignores:** Nao adicione `# type: ignore`. Corrija o tipo subjacente.
+- **Cobertura maxima:** Prefira testes que exercitam codigo real.
 
-## COGNITIVE WORKFLOW
+## FLUXO COGNITIVO
 
-1. **ANALYZE**: Read relevant files. Do not guess.
-2. **PLAN**: Map out the logic. Identify root cause or required changes. Order by dependency.
-3. **EXECUTE**: Fix the cause, not the symptom. Execute incrementally with clear commits.
-4. **VERIFY**: Run CI checks and relevant tests. Confirm via logs or output.
-5. **SPECIFICITY**: Do exactly as much as asked; nothing more, nothing less.
-6. **PROPAGATION**: Changes impact multiple files; propagate updates correctly.
+1. **ANALISAR:** Leia os arquivos relevantes. Nao adivinhe.
+2. **PLANEJAR:** Mapeie a logica. Identifique causa raiz ou mudancas necessarias.
+3. **EXECUTAR:** Corrija a causa, nao o sintoma. Commits incrementais claros.
+4. **VERIFICAR:** Rode CI checks e testes relevantes. Confirme via logs.
+5. **PRECISAO:** Faca exatamente o que foi pedido; nada mais, nada menos.
+6. **PROPAGACAO:** Mudancas impactam multiplos arquivos; propague corretamente.
 
-## SUMMARY STANDARDS
+## PADROES DE COMMIT
 
-- Summaries must be technical and granular.
-- Include: [Files Changed], [Logic Altered], [Verification Method], [Residual Risks].
+- Commits em `main`, push para `github.com/alvaro209890/vertex-cli`
+- Mensagens em ingles ou portugues, descritivas e concisas
+- Um commit por mudanca logica
 
-## GIT
+## FERRAMENTAS
 
-- Commit to `main`, push to `github.com/alvaro209890/vertex-cli`
-
-## TOOLS
-
-- Prefer built-in tools (grep, read, etc.) over shell commands. Check tool availability before use.
+- Prefira ferramentas internas (Grep, Read, Glob) a comandos shell.

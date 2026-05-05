@@ -1,87 +1,153 @@
 # Vertex CLI
 
-CLI para conectar ao proxy Vertex remoto.
+CLI para conectar ao proxy Vertex — um assistente de codigo com IA baseado em
+modelos DeepSeek, acessivel direto do terminal.
 
-Versao atual: `1.2.6`. Esta versao ja inclui WebSearch, WebFetch e o binario
-`rg` empacotado para o Grep funcionar mesmo em maquinas sem ripgrep instalado.
+**Versao atual:** `1.2.6`
 
-## Instalação
+## O que e
 
-Instalação recomendada em Linux:
+Vertex CLI e um wrapper Python que lanca um runtime Node.js empacotado (fork do
+Claude Code CLI) configurado para usar modelos DeepSeek (v4-flash, v4-pro)
+atraves de um proxy compativel com a API Anthropic.
+
+### Funcionalidades
+
+- Assistente de codigo no terminal com contexto do seu projeto
+- WebSearch e WebFetch integrados (ferramentas de busca e extracao web)
+- Grep nativo (ripgrep empacotado, sem necessidade de instalacao externa)
+- Suporte a MCP (Model Context Protocol) para extensibilidade
+- Atualizacao automatica (verifica API do servidor e GitHub Releases)
+- Dois modos de operacao: remoto (padrao) e local
+
+## Instalacao
+
+### Linux (recomendado)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alvaro209890/vertex-cli/main/scripts/install-vertex.sh | bash
 ```
 
-Instalação manual via `pipx`:
+O script instala Node.js 20+ (via nvm), Python 3.12+, pipx, e a CLI Vertex.
+Depois feche e reabra o terminal, ou rode:
+
+```bash
+source ~/.bashrc 2>/dev/null || true
+hash -r
+vertex --version
+```
+
+### Manual (pipx)
 
 ```bash
 python3 -m pip install --user pipx
 python3 -m pipx ensurepath
 pipx install "git+https://github.com/alvaro209890/vertex-cli.git" --force
 vertex --version
-vertex auth login
-vertex auth status
 ```
 
-## Painel do cliente
+### Requisitos
 
-O painel web mostra os dados da conta autenticada: tokens totais, custo estimado
-em USD/BRL, pico de consumo por hora, uso diario, mix de entrada/saida/cache,
-ultimas chamadas e uso por modelo.
+- Linux x64 (principal) ou ambiente compativel
+- Node.js 20+ (instalado automaticamente pelo script)
+- Python 3.12+
+- git
 
-O frontend usa o backend remoto padrao:
+## Uso
 
 ```bash
-https://vertex-api.cursar.space
+vertex                 # Abre a CLI (conectado ao servidor remoto)
+vertex auth login      # Fazer login com email/senha
+vertex auth status     # Verificar status da autenticacao
+vertex auth logout     # Fazer logout
+vertex --version       # Mostrar versao instalada
 ```
 
-## Atualizar em outro Linux
+No primeiro uso, voce sera guiado por um wizard de autenticacao (email/senha
+Firebase). O token e armazenado localmente em `~/.vertex/auth.json`.
 
-Use este comando em cada maquina Linux para instalar ou atualizar a CLI pela
-versao atual do `main`:
+### Modo local (opcional)
+
+Inicia um proxy local na porta 8083 em vez de conectar ao servidor remoto:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alvaro209890/vertex-cli/main/scripts/install-vertex.sh | bash
+VERTEX_LOCAL_PROXY=true vertex
 ```
 
-Depois feche e abra o terminal, ou rode:
+Util quando voce tem o `vertex-server` rodando localmente.
+
+## Comandos disponiveis na CLI
+
+| Comando | Descricao |
+|---------|-----------|
+| `/help` | Mostrar ajuda e comandos disponiveis |
+| `/config` | Abrir painel de configuracao (tema, modelo, permissoes) |
+| `/model` | Selecionar modelo (flash/pro) |
+| `/mcp` | Gerenciar servidores MCP |
+| `/plugin` | Gerenciar plugins |
+| `/resume` | Retomar sessoes anteriores |
+| `/status` | Ver status da sessao atual |
+| `/logout` | Fazer logout |
+| `/clear` | Limpar historico da sessao |
+| `/compact` | Compactar contexto da conversa |
+| `/add-dir` | Adicionar diretorio ao workspace |
+| `/ide` | Conectar ao VS Code/JetBrains |
+| `/pr` | Criar/manejar pull requests |
+| `/review-pr` | Revisar pull requests |
+| `/commit` | Gerar commit com as alteracoes |
+
+## Configuracao
+
+As configuracoes sao salvas em `~/.vertex/settings.json`. Principais opcoes:
+
+- **Modelo:** alternar entre `deepseek-v4-flash` (rapido) e `deepseek-v4-pro` (potente)
+- **Tema:** escuro, claro, daltonico-friendly, ou cores ANSI
+- **Permissoes:** modo padrao, auto-aprovacao, ou bypass
+- **Output style:** formato das respostas (padrao, compacto, verbose)
+
+## Atualizacao
+
+A CLI verifica automaticamente por atualizacoes a cada 24h (via API do servidor
+e GitHub Releases). Se houver versao nova, voce sera perguntado se deseja
+atualizar.
+
+Para atualizar manualmente:
 
 ```bash
-source ~/.bashrc 2>/dev/null || true
-hash -r
-vertex --version
-vertex auth login
-vertex auth status
+pipx upgrade vertex-cli
 ```
 
-Se preferir fazer manualmente, rode:
+Para pular a verificacao de atualizacao:
 
 ```bash
-python3 -m pip install --user pipx
-python3 -m pipx ensurepath
-source ~/.bashrc 2>/dev/null || true
+VERTEX_SKIP_UPDATE_CHECK=1 vertex
+```
 
-if ! command -v node >/dev/null 2>&1; then
-  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
-  export NVM_DIR="$HOME/.nvm"
-  . "$NVM_DIR/nvm.sh"
-  nvm install 20
-  nvm alias default 20
-fi
+## Solucao de problemas
 
-pipx uninstall vertex-cli 2>/dev/null || true
-pipx uninstall vertex-deepseek 2>/dev/null || true
+### "Runtime do Vertex CLI nao encontrado"
+
+```bash
+pipx uninstall vertex-cli
 pipx install "git+https://github.com/alvaro209890/vertex-cli.git" --force
-
-hash -r
-vertex --version
-vertex auth login
-vertex auth status
 ```
 
-Se a maquina ja tinha configuracao antiga e continuar mostrando erro estranho,
-limpe a sessao/config local e faca login novamente:
+### "Node.js e necessario"
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+source ~/.bashrc
+nvm install 20
+nvm alias default 20
+```
+
+### "Sessao expirada"
+
+```bash
+vertex auth login
+```
+
+### Erros estranhos apos atualizacao
 
 ```bash
 vertex auth logout
@@ -90,25 +156,36 @@ vertex auth login
 vertex
 ```
 
-Observacao: a CLI so deve mostrar "Conta bloqueada" quando o servidor responder
-explicitamente que a conta foi bloqueada. Respostas `403` genericas de
-Cloudflare/WAF agora aparecem apenas como aviso de verificacao de status.
+## Arquitetura
 
-## Uso
-
-```bash
-vertex              # Abre a CLI (conectado ao servidor remoto)
-vertex auth login   # Fazer login com email/senha
-vertex auth status  # Verificar status da autenticacao
-vertex /logout      # Fazer logout
+```
+vertex (comando)
+  └── cli/entrypoints.py         # Entry point Python
+        ├── vertex_auth/         # Autenticacao Firebase
+        ├── Verifica saldo (/me)
+        ├── Verifica atualizacao (API + GitHub)
+        ├── Configura ambiente (modelos, tokens)
+        └── Lanca vendor/vertex-cli/bin/vertex (Node.js)
+              └── Conecta em vertex-api.cursar.space (remoto)
+                    ou 127.0.0.1:8083 (local)
 ```
 
-No modo remoto, a CLI usa o ID token Firebase da sessao autenticada como
-`ANTHROPIC_AUTH_TOKEN`. Isso permite que o backend aplique bloqueio e saldo por
-usuario nas chamadas `/v1/*`.
+### Fluxo de execucao
 
-## Modo local (opcional)
+1. `vertex` → `cli()` detecta modo (remoto por padrao, local se `VERTEX_LOCAL_PROXY=true`)
+2. Verifica autenticacao Firebase — se nao autenticado, abre wizard de login
+3. Confirma status da conta via `GET /me` no servidor remoto
+4. Verifica atualizacoes (API do servidor → GitHub Releases, usa a maior)
+5. Escreve `~/.vertex/settings.json` com modelos e configuracoes
+6. Lanca `node vendor/vertex-cli/bin/vertex` com ambiente configurado
 
-```bash
-VERTEX_LOCAL_PROXY=true vertex
-```
+## Painel do cliente
+
+O painel web mostra dados da conta: tokens totais, custo estimado em USD/BRL,
+pico de consumo, uso diario, e metricas por modelo.
+
+Acesse em: https://vertex-ad5da.web.app
+
+## Repositorios relacionados
+
+- [vertex-server](https://github.com/alvaro209890/vertex-server) — Backend do proxy, bots Discord/Telegram, dashboard admin

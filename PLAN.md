@@ -1,115 +1,100 @@
-# Architecture Plan
+# Architecture Plan — Vertex CLI
 
-This document is the baseline architecture guide referenced by `AGENTS.md`. It
-records the intended dependency direction and the migration target for keeping
-the project modular as providers, clients, and smoke tests grow.
+Guia de arquitetura do cliente Vertex. Referenciado por `AGENTS.md`.
 
-## Current Product Shape
+## Estrutura do Projeto
 
-Vertex is a DeepSeek-backed, Anthropic-compatible proxy with a bundled CLI and
-optional messaging workers:
-
-- `api/` owns the HTTP routes, request orchestration, model routing, auth, and
-  server lifecycle.
-- `providers/` owns upstream model adapters, request conversion, stream
-  conversion, provider rate limiting, and provider error mapping.
-- `messaging/` owns Discord and Telegram adapters, command handling, tree
-  threading, session persistence, transcript rendering, and voice intake.
-- `cli/` owns package entrypoints and managed Claude CLI subprocess sessions.
-- `config/` owns environment-backed settings and logging setup.
-- `smoke/` owns opt-in product smoke scenarios and the public coverage
-  inventory used by contract tests.
-
-## Intended Dependency Direction
-
-The repo should preserve this dependency order:
-
-```mermaid
-flowchart TD
-    config[config] --> api[api]
-    config --> providers[providers]
-    config --> messaging[messaging]
-    core[core.anthropic] --> api
-    core --> providers
-    core --> messaging
-    providers --> api
-    api --> cli[cli]
-    api --> messaging
-    cli --> messaging
+```
+vertex-cli/
+├── cli/                       # Entrypoints e gerenciamento da CLI
+│   ├── entrypoints.py         # Funcao principal cli() + modos (remoto/local)
+│   ├── session.py             # CLISession: ciclo de vida do subprocesso
+│   ├── manager.py             # CLISessionManager: pool assincrono de sessoes
+│   ├── process_registry.py    # Rastreador global de PIDs com cleanup atexit
+│   └── setup_wizard.py        # Wizard interativo de login Firebase
+├── vertex_auth/               # Cliente de autenticacao Firebase
+│   └── client.py              # signIn, refresh, logout via REST API
+├── vendor/vertex-cli/         # Runtime Node.js empacotado (fork Claude Code)
+│   ├── bin/vertex             # Launcher Node.js
+│   └── dist/cli.mjs           # Bundle principal (~20MB) com patches PT-BR
+├── scripts/                   # Instalacao e manutencao
+│   └── install-vertex.sh      # Script one-curl-pipe-bash
+├── tests/                     # Testes pytest
+│   ├── cli/                   # Testes de entrypoints, sessao, manager
+│   └── contracts/             # Testes de contrato (import boundaries, smoke)
+└── pyproject.toml             # Build system (hatchling), deps, ferramentas
 ```
 
-Runtime note: `api.runtime` imports `cli` and `messaging` to wire the optional
-messaging stack; `messaging` does not import `cli` (session/CLI access is passed
-in from `api.runtime`).
+## Fluxo de Dependencia
 
-The practical rule is simpler than the graph: shared protocol helpers belong in
-neutral core modules, not under a provider package. Provider adapters may depend
-on the neutral protocol layer, but API and messaging code should not import
-provider internals.
+```
+vertex_auth → cli/entrypoints.py → vendor/vertex-cli/bin/vertex
+                    ↑
+              cli/setup_wizard.py
+```
 
-The diagram above mixes **Python import direction** (e.g. `config` → `providers`)
-with **runtime composition** (e.g. `api.runtime` constructs `cli` and `messaging`).
-`PLAN.md` remains the product map; **encoded** rules (including root imports like
-`import api`, relative imports, and `api` → `providers` facade allowlists) live in
-`tests/contracts/test_import_boundaries.py`.
+Nao ha dependencia circular. `vertex_auth` e puramente um cliente HTTP Firebase.
+`cli/` orquestra autenticacao, verificacao de saldo, update, e lancamento do runtime.
 
-**Contract highlights:** `api/` may import only `providers.base`, `providers.exceptions`,
-and `providers.registry` from the providers package (not per-adapter modules).
-`core/` stays free of `api`, `messaging`, `cli`, `providers`, `config`, and `smoke`.
-`messaging/` does not import `api`, `cli`, or `smoke`; provider access is passed
-in from runtime composition instead of importing adapter internals. Stream
-contract helpers live in `core/anthropic/stream_contracts.py`; live smoke imports
-that module directly (no dedicated smoke SSE shim). Default upstream base URLs
-use a single constant per endpoint in `providers/defaults.py`, currently the
-DeepSeek Anthropic-compatible endpoint. Process-cached provider helpers
-(`api.dependencies.get_provider` / `get_provider_for_type`) exist for scripts and
-unit tests; production HTTP handlers must use `resolve_provider` with
-`request.app` so the app-scoped `ProviderRegistry` is used. The `api` package
-`__all__` exposes HTTP models and `create_app` only (not `app`, not those helpers).
-`api.app:create_app` is the ASGI factory (e.g. `uvicorn api.app:create_app --factory`);
-`server.py` still exposes `server:app` as a module-level instance for convenience.
+## Modos de Operacao
 
-## Target Boundaries
+### Modo Remoto (padrao)
+```
+Usuario → vertex → cli() → autentica Firebase
+                        → GET /me (verifica saldo)
+                        → node bin/vertex
+                          └── ANTHROPIC_BASE_URL=https://vertex-api.cursar.space
+```
 
-- `core/anthropic/`: Anthropic protocol helpers, stream primitives, content
-  extraction, token estimation, user-facing error strings, request conversion,
-  thinking, tool helpers, and stream contract assertions
-  (`stream_contracts.py`) shared across API, providers, messaging, and tests.
-- `api/runtime.py`: application composition, optional messaging startup,
-  session store restoration, and cleanup ownership.
-- `providers/`: provider descriptors, credential resolution, transport
-  factories, scoped rate limiters, upstream request builders, and stream
-  transformers.
-- `messaging/`: platform-neutral orchestration split from command dispatch,
-  rendering, voice handling, and persistence.
-- `cli/`: typed Claude CLI runner config, subprocess management, and packaged
-  user-facing entrypoints.
+### Modo Local
+```
+Usuario → VERTEX_LOCAL_PROXY=true vertex
+       → cli() → python -m vertex_proxy (porta 8083)
+               → node bin/vertex
+                 └── ANTHROPIC_BASE_URL=http://127.0.0.1:8083
+```
 
-## Smoke Coverage Policy
+## Auto-Update
 
-Default CI stays deterministic and runs `uv run pytest` against `tests/`.
-Product smoke lives under `smoke/` and is enabled with `FCC_LIVE_SMOKE=1`.
-Smoke runs should use `-n 0` unless a scenario is explicitly known to be safe
-under xdist.
+1. `_check_and_prompt_update()` executado a cada 24h (cache em `~/.vertex/update_check.json`)
+2. Consulta `GET /cli-version` na API do servidor
+3. Consulta GitHub Releases (`/repos/alvaro209890/vertex-cli/releases/latest`)
+4. Usa a **maior versao** entre as duas fontes
+5. Se `latest > installed`, pergunta `[Y] Sim, atualizar  [n] Nao  [s] Pular esta versao`
+6. Atualiza via `pipx upgrade` ou `uv tool upgrade`
 
-Live smoke has two valid skip classes:
+Skip via env: `VERTEX_SKIP_UPDATE_CHECK=1 vertex`
 
-- `missing_env`: credentials, local services, binaries, or explicit opt-in flags
-  are absent.
-- `upstream_unavailable`: real providers, bot APIs, or local model servers are
-  unreachable.
+## Configuracao Local
 
-`product_failure` and `harness_bug` are regressions. When a provider is
-explicitly selected by `FCC_SMOKE_PROVIDER_MATRIX`, missing configuration should
-fail instead of being silently skipped.
+- `~/.vertex/settings.json` — configuracoes da CLI vendored (modelos, env, permissoes)
+- `~/.vertex/auth.json` — token Firebase (permissao 0600)
+- `~/.vertex/update_check.json` — cache de verificacao de atualizacao
+- `~/.vertex/.claude.json` — arquivo de estado da CLI (criado/validado pelo wrapper)
+- `~/.config/vertex/.env` — variaveis de ambiente do usuario
 
-## Refactor Rules
+## Regras de Desenvolvimento
 
-- Keep public request/response shapes stable while moving internals.
-- Complete module migrations in one change: update imports to the new owner and
-  remove old compatibility shims unless preserving a published interface is
-  explicitly required.
-- Lock behavior with focused tests before moving shared protocol or runtime
-  code.
-- Run checks in this order: `uv run ruff format`, `uv run ruff check`,
-  `uv run ty check`, `uv run pytest`.
+- **DRY:** Extrair logica compartilhada. Preferir composicao a copy-paste.
+- **Encapsulamento:** Usar metodos de acesso, nao atribuicao direta de `_atributos`.
+- **Codigo morto:** Remover codigo e valores hardcoded nao utilizados.
+- **Tipagem:** Usar `from __future__ import annotations`, type hints, dataclasses frozen.
+- **PT-BR:** Todas as strings visiveis ao usuario devem estar em portugues brasileiro.
+- **Idempotencia:** Scripts e funcoes de configuracao devem ser seguros para reexecucao.
+
+## Testes
+
+- Framework: pytest + pytest-asyncio + pytest-xdist
+- Marcadores: `cli` (integracao), `contract` (contratos de arquitetura)
+- Testes de contrato validam fronteiras de importacao, manifesto de features, smoke config
+- Nunca adicionar `# type: ignore` ou `# ty: ignore`
+
+## CI / Qualidade
+
+Executar em ordem:
+```bash
+uv run ruff format  # formatacao
+uv run ruff check   # linting
+uv run ty check     # type checking
+uv run pytest       # testes
+```
