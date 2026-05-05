@@ -494,6 +494,26 @@ def _ensure_vertex_cli_settings(env_updates: dict[str, str]) -> None:
     VERTEX_CLI_SETTINGS_FILE.write_text(
         json.dumps(settings, indent=2) + "\n", encoding="utf-8"
     )
+    _ensure_vertex_cli_state_file()
+
+
+def _ensure_vertex_cli_state_file() -> None:
+    """Create/repair the vendored CLI state file before Node reads it."""
+    import json
+
+    VERTEX_CLI_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    state_file = VERTEX_CLI_CONFIG_DIR / ".claude.json"
+    if state_file.exists():
+        try:
+            raw_state = json.loads(state_file.read_text("utf-8"))
+            if isinstance(raw_state, dict):
+                return
+        except json.JSONDecodeError:
+            pass
+
+    state_file.write_text("{}\n", encoding="utf-8")
+    with contextlib.suppress(OSError):
+        state_file.chmod(0o600)
 
 
 def _vertex_cli_bin() -> Path:
@@ -870,7 +890,12 @@ def _perform_update() -> bool:
         # Fallback: pipx install --force
         try:
             result = subprocess.run(
-                [pipx_path, "install", f"git+https://github.com/alvaro209890/vertex-cli.git", "--force"],
+                [
+                    pipx_path,
+                    "install",
+                    "git+https://github.com/alvaro209890/vertex-cli.git",
+                    "--force",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=180,
@@ -913,11 +938,10 @@ def _check_and_prompt_update() -> None:
     if _is_version_skipped(latest):
         return
 
-    if _prompt_update(latest):
-        if _perform_update():
-            print(f"\n{GREEN}Vertex CLI atualizado para v{latest}!{RESET}")
-            print("Execute 'vertex' novamente para usar a nova versao.")
-            sys.exit(0)
+    if _prompt_update(latest) and _perform_update():
+        print(f"\n{GREEN}Vertex CLI atualizado para v{latest}!{RESET}")
+        print("Execute 'vertex' novamente para usar a nova versao.")
+        sys.exit(0)
     # Se nao atualizou, continua normalmente
 
 

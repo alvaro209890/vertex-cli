@@ -108,6 +108,22 @@ def test_vertex_cli_bin_allows_explicit_override(tmp_path: Path) -> None:
         assert _vertex_cli_bin() == override
 
 
+def test_ensure_vertex_cli_state_file_repairs_empty_json(tmp_path: Path) -> None:
+    """An empty .claude.json is replaced before the vendored Node CLI parses it."""
+    from cli import entrypoints
+
+    config_dir = tmp_path / ".vertex"
+    state_file = config_dir / ".claude.json"
+    config_dir.mkdir()
+    state_file.write_text("", encoding="utf-8")
+
+    with patch.object(entrypoints, "VERTEX_CLI_CONFIG_DIR", config_dir):
+        entrypoints._ensure_vertex_cli_state_file()
+
+    assert state_file.read_text(encoding="utf-8") == "{}\n"
+    assert state_file.stat().st_mode & 0o777 == 0o600
+
+
 def test_cli_launches_vendored_vertex_runtime(tmp_path: Path) -> None:
     """cli() launches the vendored runtime for version checks without startup."""
     import sys
@@ -433,10 +449,13 @@ def test_cli_auth_status_reports_not_authenticated(tmp_path: Path) -> None:
     import sys
 
     from cli import entrypoints
+    from vertex_auth import client as auth_client
 
+    auth_file = tmp_path / "auth.json"
     printed: list[str] = []
 
     with (
+        patch.object(auth_client, "AUTH_FILE", auth_file),
         patch.object(sys, "argv", ["vertex", "auth", "status"]),
         patch(
             "builtins.print",
