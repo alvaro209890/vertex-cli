@@ -767,11 +767,17 @@ def _fetch_latest_version_from_api() -> str | None:
 
 
 def _get_latest_version() -> str | None:
-    """Try the Vertex API first, then fall back to GitHub Releases."""
-    version = _fetch_latest_version_from_api()
-    if version:
-        return version
-    return _fetch_latest_version_from_github()
+    """Busca a versao mais recente da API e do GitHub, retornando a maior."""
+    api_version = _fetch_latest_version_from_api()
+    gh_version = _fetch_latest_version_from_github()
+
+    if api_version and gh_version:
+        return (
+            api_version
+            if _parse_version(api_version) >= _parse_version(gh_version)
+            else gh_version
+        )
+    return api_version or gh_version
 
 
 def _read_update_cache() -> dict[str, Any]:
