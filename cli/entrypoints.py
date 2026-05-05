@@ -15,6 +15,8 @@ VERTEX_CLI_SETTINGS_FILE = VERTEX_CLI_CONFIG_DIR / "settings.json"
 DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
 DEEPSEEK_ONLY_DEFAULT_MODEL = DEFAULT_MODEL
 PACKAGE_NAME = "vertex-cli"
+UPDATE_CHECK_CACHE_FILE = VERTEX_CLI_CONFIG_DIR / "update_check.json"
+UPDATE_CHECK_CACHE_TTL_HOURS = 24  # Só pergunta de novo depois de 24h
 MANAGED_VERTEX_CLI_ENV_BASE = {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:{port}",
     "ANTHROPIC_AUTH_TOKEN": "freecc",
@@ -701,6 +703,227 @@ def _is_local_proxy_requested() -> bool:
     return os.environ.get("VERTEX_LOCAL_PROXY") == "true"
 
 
+# ==================== Auto-update ====================
+
+
+def _parse_version(version_str: str) -> tuple[int, ...]:
+    """Convert '1.2.3' to (1, 2, 3) for comparison."""
+    try:
+        return tuple(int(part) for part in version_str.strip("v").split("."))
+    except (ValueError, AttributeError):
+        return (0,)
+
+
+def _fetch_latest_version_from_github() -> str | None:
+    """Fetch the latest version tag from GitHub Releases."""
+    import json
+    import urllib.request
+
+    url = (
+        "https://api.github.com/repos/alvaro209890/vertex-cli/releases/latest"
+    )
+    req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Vertex-CLI"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            tag = data.get("tag_name", "")
+            return tag.lstrip("v") if tag else None
+    except Exception:
+        return None
+
+
+def _fetch_latest_version_from_api() -> str | None:
+    """Fetch the latest version from the Vertex server API endpoint."""
+    import json
+    import urllib.request
+
+    url = f"{VERTEX_API_URL}/cli-version"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data.get("latest")
+    except Exception:
+        return None
+
+
+def _get_latest_version() -> str | None:
+    """Try GitHub API first, then fall back to server API."""
+    version = _fetch_latest_version_from_github()
+    if version:
+        return version
+    return _fetch_latest_version_from_api()
+
+
+def _read_update_cache() -> dict[str, Any]:
+    """Read cached update check timestamp."""
+    import json
+
+    if not UPDATE_CHECK_CACHE_FILE.exists():
+        return {}
+    try:
+        data = json.loads(UPDATE_CHECK_CACHE_FILE.read_text("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_update_cache(version_skipped: str | None = None) -> None:
+    """Write update check cache with current timestamp."""
+    import json
+    import time
+
+    VERTEX_CLI_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    data = {"last_check": time.time()}
+    if version_skipped:
+        data["skipped_version"] = version_skipped
+    UPDATE_CHECK_CACHE_FILE.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
+
+def _should_check_for_updates() -> bool:
+    """Return True if enough time has passed since last check."""
+    import time
+
+    cache = _read_update_cache()
+    last_check = cache.get("last_check", 0)
+    elapsed = time.time() - last_check
+    return elapsed >= UPDATE_CHECK_CACHE_TTL_HOURS * 3600
+
+
+def _is_version_skipped(latest_version: str) -> bool:
+    """Return True if the user already skipped this specific version."""
+    cache = _read_update_cache()
+    return cache.get("skipped_version") == latest_version
+
+
+def _is_update_available(latest_version: str) -> bool:
+    """Compare installed version with latest available version."""
+    current = _installed_vertex_version()
+    if current == "unknown":
+        return False
+    return _parse_version(latest_version) > _parse_version(current)
+
+
+def _prompt_update(latest_version: str) -> bool:
+    """Ask the user if they want to update. Returns True if yes."""
+    current = _installed_vertex_version()
+    print()
+    print(f"{BOLD}╔══ Atualizacao disponivel! ═══════════════════╗{RESET}")
+    print(f"{BOLD}║{RESET}  Vertex CLI {current} → {BOLD}{GREEN}v{latest_version}{RESET}")
+    print(f"{BOLD}║{RESET}                                                       ")
+    print(f"{BOLD}║{RESET}  Deseja atualizar agora? (recomendado)")
+    print(f"{BOLD}║{RESET}                                                       ")
+    print(f"{BOLD}║{RESET}  [{GREEN}Y{RESET}] Sim, atualizar   [{YELLOW}n{RESET}] Nao   [{YELLOW}s{RESET}] Pular esta versao")
+    print(f"{BOLD}╚═══════════════════════════════════════════════╝{RESET}")
+    answer = input("Escolha [Y/n/s]: ").strip().lower()
+    if answer in ("s", "skip"):
+        _write_update_cache(version_skipped=latest_version)
+        print(f"{YELLOW}Versao {latest_version} sera ignorada nas proximas 24h.{RESET}")
+        return False
+    if answer in ("", "y", "yes", "sim"):
+        return True
+    _write_update_cache()
+    return False
+
+
+def _perform_update() -> bool:
+    """Run pipx upgrade. Returns True on success."""
+    import shutil
+    import subprocess
+
+    # Detecta qual gerenciador de pacote foi usado
+    pipx_path = shutil.which("pipx")
+    uv_path = shutil.which("uv")
+
+    print(f"\n{BOLD}Atualizando Vertex CLI...{RESET}")
+    print()
+
+    if uv_path:
+        # Tenta com uv tool upgrade primeiro
+        try:
+            result = subprocess.run(
+                [uv_path, "tool", "upgrade", PACKAGE_NAME],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode == 0:
+                print(f"{GREEN}✓ Vertex CLI atualizado com sucesso via uv!{RESET}")
+                return True
+        except Exception:
+            pass
+
+    if pipx_path:
+        # Tenta com pipx upgrade
+        try:
+            result = subprocess.run(
+                [pipx_path, "upgrade", PACKAGE_NAME],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode == 0:
+                print(f"{GREEN}✓ Vertex CLI atualizado com sucesso via pipx!{RESET}")
+                return True
+        except Exception:
+            pass
+
+        # Fallback: pipx install --force
+        try:
+            result = subprocess.run(
+                [pipx_path, "install", f"git+https://github.com/alvaro209890/vertex-cli.git", "--force"],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            if result.returncode == 0:
+                print(f"{GREEN}✓ Vertex CLI atualizado com sucesso!{RESET}")
+                return True
+        except Exception:
+            pass
+
+    print(f"{RED}Falha ao atualizar. Faca manualmente:{RESET}")
+    print(f"  pipx upgrade {PACKAGE_NAME}")
+    return False
+
+
+def _check_and_prompt_update() -> None:
+    """Main check: if update available and user wants it, perform update and exit."""
+    # Nao verificar se desabilitado via env
+    if os.environ.get("VERTEX_SKIP_UPDATE_CHECK") == "1":
+        return
+
+    # Nao verificar se esta em modo local
+    if _is_local_proxy_requested():
+        return
+
+    # Verifica cache
+    if not _should_check_for_updates():
+        return
+
+    latest = _get_latest_version()
+    if not latest:
+        # Falha no check, apenas continua normalmente
+        _write_update_cache()
+        return
+
+    if not _is_update_available(latest):
+        _write_update_cache()
+        return
+
+    if _is_version_skipped(latest):
+        return
+
+    if _prompt_update(latest):
+        if _perform_update():
+            print(f"\n{GREEN}Vertex CLI atualizado para v{latest}!{RESET}")
+            print("Execute 'vertex' novamente para usar a nova versao.")
+            sys.exit(0)
+    # Se nao atualizou, continua normalmente
+
+
+# ==================== Fim Auto-update ====================
+
+
 def cli() -> None:
     """Launch Vertex CLI: ensure auth + proxy are running, open the vendored CLI runtime.
 
@@ -749,6 +972,9 @@ def cli() -> None:
     # Verifica autenticacao
     _run_auth_wizard_if_needed()
     remote_auth_token = _ensure_remote_account_active()
+
+    # Verifica atualizacoes
+    _check_and_prompt_update()
 
     # Decide modo: remoto (padrão) vs local
     env = os.environ.copy()
