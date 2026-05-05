@@ -515,6 +515,21 @@ def test_remote_account_check_uses_cli_user_agent() -> None:
     response.close.assert_called_once()
 
 
+def test_update_check_prefers_vertex_api_version() -> None:
+    """Server API controls the upgrade prompt used by already-installed CLIs."""
+    from cli import entrypoints
+
+    with (
+        patch.object(entrypoints, "_fetch_latest_version_from_api", return_value="1.2.5"),
+        patch.object(
+            entrypoints, "_fetch_latest_version_from_github", return_value="1.2.4"
+        ) as github,
+    ):
+        assert entrypoints._get_latest_version() == "1.2.5"
+
+    github.assert_not_called()
+
+
 def test_remote_account_check_exits_when_credits_are_empty() -> None:
     """Remote mode should stop before launching when the account has no balance."""
     import sys

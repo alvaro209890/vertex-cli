@@ -14,11 +14,11 @@ def test_vendored_vertex_cli_version_matches_python_package() -> None:
         (repo / "vendor" / "vertex-cli" / "package.json").read_text(encoding="utf-8")
     )
 
-    assert 'version = "1.2.4"' in pyproject
-    assert cli_package["version"] == "1.2.4"
-    assert 'version("1.2.4 (Vertex)"' in cli_bundle
-    assert 'console.log(`${"1.2.4"} (Vertex)`)' in cli_bundle
-    assert 'vertex ${RESET}${rgb(...ACCENT)}v${"1.2.4"}' in cli_bundle
+    assert 'version = "1.2.5"' in pyproject
+    assert cli_package["version"] == "1.2.5"
+    assert 'version("1.2.5 (Vertex)"' in cli_bundle
+    assert 'console.log(`${"1.2.5"} (Vertex)`)' in cli_bundle
+    assert 'vertex ${RESET}${rgb(...ACCENT)}v${"1.2.5"}' in cli_bundle
     assert 'vertex ${RESET}${rgb(...ACCENT)}v${"1.0.0"}' not in cli_bundle
     assert (
         'return { name: "Vertex", model: resolvedModel, baseUrl: anthropicBaseUrl, isLocal: true };'
@@ -100,3 +100,32 @@ def test_vendored_vertex_cli_core_slash_commands_are_pt_br() -> None:
     assert 'description: "Manage MCP servers"' not in cli_bundle
     assert 'description: "Clear the DeepSeek API key"' not in cli_bundle
     assert 'description: "Manage Claude Code plugins"' not in cli_bundle
+
+
+def test_vendored_web_search_forces_server_tool_choice_for_deepseek_proxy() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    cli_bundle = (repo / "vendor" / "vertex-cli" / "dist" / "cli.mjs").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'toolChoice: { type: "tool", name: "web_search" }' in cli_bundle
+    assert (
+        'toolChoice: useHaiku ? { type: "tool", name: "web_search" } : undefined'
+        not in cli_bundle
+    )
+
+
+def test_vendored_ripgrep_fallback_binary_is_packaged() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    rg_binary = (
+        repo
+        / "vendor"
+        / "vertex-cli"
+        / "dist"
+        / "vendor"
+        / "ripgrep"
+        / "x64-linux"
+        / "rg"
+    )
+
+    assert rg_binary.is_file()

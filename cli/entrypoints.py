@@ -747,11 +747,11 @@ def _fetch_latest_version_from_api() -> str | None:
 
 
 def _get_latest_version() -> str | None:
-    """Try GitHub API first, then fall back to server API."""
-    version = _fetch_latest_version_from_github()
+    """Try the Vertex API first, then fall back to GitHub Releases."""
+    version = _fetch_latest_version_from_api()
     if version:
         return version
-    return _fetch_latest_version_from_api()
+    return _fetch_latest_version_from_github()
 
 
 def _read_update_cache() -> dict[str, Any]:
