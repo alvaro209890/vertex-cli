@@ -219,10 +219,10 @@ def test_cli_creates_default_vertex_settings(tmp_path: Path) -> None:
         run.return_value.returncode = 0
         entrypoints.cli()
 
-    # Modo remoto padrao: usa VERTEX_API_URL, nao inicia proxy local
+    # Modo remoto padrao: usa proxy de forwarding local (porta 8084)
     env = run.call_args.kwargs["env"]
-    assert env["ANTHROPIC_BASE_URL"] == entrypoints.VERTEX_API_URL
-    assert env["ANTHROPIC_AUTH_TOKEN"] == "firebase-token"
+    assert env["ANTHROPIC_BASE_URL"] == f"http://127.0.0.1:{entrypoints.REMOTE_PROXY_PORT}"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "freecc"
 
 
 def test_cli_local_proxy_mode(tmp_path: Path) -> None:
@@ -306,15 +306,16 @@ def test_cli_overwrites_stale_openclaude_settings(tmp_path: Path) -> None:
         run.return_value.returncode = 0
         entrypoints.cli()
 
-    # Modo remoto: usa VERTEX_API_URL diretamente nas env vars do subprocess
+    # Modo remoto: usa proxy de forwarding local (porta 8084)
     env = run.call_args.kwargs["env"]
-    assert env["ANTHROPIC_BASE_URL"] == entrypoints.VERTEX_API_URL
-    assert env["ANTHROPIC_AUTH_TOKEN"] == "firebase-token"
+    expected_url = f"http://127.0.0.1:{entrypoints.REMOTE_PROXY_PORT}"
+    assert env["ANTHROPIC_BASE_URL"] == expected_url
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "freecc"
     assert env["DISABLE_LOGIN_COMMAND"] == "1"
 
     settings = json.loads(settings_file.read_text(encoding="utf-8"))
-    assert settings["env"]["ANTHROPIC_BASE_URL"] == entrypoints.VERTEX_API_URL
-    assert settings["env"]["ANTHROPIC_AUTH_TOKEN"] == "firebase-token"
+    assert settings["env"]["ANTHROPIC_BASE_URL"] == expected_url
+    assert settings["env"]["ANTHROPIC_AUTH_TOKEN"] == "freecc"
     assert settings["env"]["DISABLE_LOGIN_COMMAND"] == "1"
     assert "OPENAI_API_KEY" not in settings["env"]
     assert "provider" not in settings

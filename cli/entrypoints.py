@@ -25,6 +25,7 @@ MANAGED_VERTEX_CLI_ENV_BASE = {
 
 VERTEX_API_URL = "https://vertex-api.cursar.space"
 VERTEX_WEB_URL = "https://vertex-ad5da.web.app"
+REMOTE_PROXY_PORT = "8084"
 
 
 def _load_env_template() -> str:
@@ -951,6 +952,83 @@ def _check_and_prompt_update() -> None:
     # Se nao atualizou, continua normalmente
 
 
+# ==================== Remote Proxy (forwarding com refresh de token) ====================
+
+
+def _start_remote_proxy() -> bool:
+    """Start the remote forwarding proxy in background. Returns True if ready."""
+    import subprocess
+
+    port = os.environ.get("VERTEX_REMOTE_PROXY_PORT", REMOTE_PROXY_PORT)
+    health = _read_proxy_health(port)
+    if health is not None:
+        if health.get("mode") == "remote-proxy":
+            from loguru import logger as loguru_logger
+
+            loguru_logger.debug("Remote proxy ja esta rodando na porta {}", port)
+            return True
+        print("Reiniciando proxy de forwarding remoto...")
+        _terminate_vertex_proxy_processes()
+        _wait_for_proxy_down(port)
+    else:
+        print("Iniciando proxy de forwarding remoto...")
+
+    subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "from cli.remote_proxy import start_remote_proxy; "
+            f"start_remote_proxy(port={port})",
+        ],
+        env={**os.environ, "PORT": str(port)},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    for _ in range(15):
+        import time
+
+        time.sleep(1)
+        health = _read_proxy_health(port)
+        if health and health.get("mode") == "remote-proxy":
+            return True
+
+    print(
+        f"{YELLOW}Aviso: O proxy de forwarding remoto pode nao ter iniciado "
+        f"na porta {port}.{RESET}"
+    )
+    return False
+
+
+def _remote_proxy_cli_env() -> dict[str, str]:
+    """Return environment values for vendored CLI through remote forwarding proxy."""
+    import json
+
+    models = _configured_model_values()
+    port = os.environ.get("VERTEX_REMOTE_PROXY_PORT", REMOTE_PROXY_PORT)
+    env = {
+        "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
+        "ANTHROPIC_AUTH_TOKEN": "freecc",
+        "DISABLE_LOGIN_COMMAND": "1",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": models["opus"],
+        "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": _display_model_name(models["opus"]),
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": models["sonnet"],
+        "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": _display_model_name(models["sonnet"]),
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": models["haiku"],
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": _display_model_name(models["haiku"]),
+    }
+
+    unique_models: list[str] = []
+    for m in (models["opus"], models["sonnet"], models["haiku"], models["default"]):
+        if m and m not in unique_models:
+            unique_models.append(m)
+    for known in ("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"):
+        if known not in unique_models:
+            unique_models.append(known)
+    env["OPENCLAUDE_EXTRA_MODEL_OPTIONS"] = json.dumps(unique_models)
+    return env
+
+
 # ==================== Fim Auto-update ====================
 
 
@@ -958,7 +1036,8 @@ def cli() -> None:
     """Launch Vertex CLI: ensure auth + proxy are running, open the vendored CLI runtime.
 
     Comportamento:
-      - Padrão: modo remoto (conecta ao servidor vertex-api.cursar.space)
+      - Padrão: modo remoto (conecta ao servidor vertex-api.cursar.space
+        via proxy de forwarding local com refresh automatico de token)
       - VERTEX_LOCAL_PROXY=true: modo local (inicia proxy na máquina do usuário)
     """
     import subprocess
@@ -1028,7 +1107,7 @@ def cli() -> None:
         env.update(local_env)
         env["VERTEX_DASHBOARD_URL"] = f"http://localhost:{port}/dashboard"
     else:
-        # ─── Modo remoto (padrão) ───
+        # ─── Modo remoto (padrão) — com proxy de forwarding local ───
         print("Conectando ao servidor Vertex...")
         if not remote_auth_token:
             print(
@@ -1036,9 +1115,11 @@ def cli() -> None:
                 f"`vertex auth login`.{RESET}"
             )
             sys.exit(1)
-        remote_env = _remote_vertex_cli_env(remote_auth_token)
-        _ensure_vertex_cli_settings(remote_env)
-        env.update(remote_env)
+        # Inicia proxy de forwarding local com watchdog de token
+        _start_remote_proxy()
+        proxy_env = _remote_proxy_cli_env()
+        _ensure_vertex_cli_settings(proxy_env)
+        env.update(proxy_env)
         env["VERTEX_DASHBOARD_URL"] = VERTEX_API_URL
 
     # Set NODE_OPTIONS memory limit when not user-overridden
