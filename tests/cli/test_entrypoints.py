@@ -389,6 +389,26 @@ def test_start_proxy_restarts_stale_running_proxy() -> None:
     assert popen.call_args.kwargs["env"]["PORT"] == "8083"
 
 
+def test_start_remote_proxy_uses_blocking_runner() -> None:
+    """Remote forwarding proxy subprocess must stay alive after startup."""
+    from cli import entrypoints
+
+    with (
+        patch.object(
+            entrypoints,
+            "_read_proxy_health",
+            side_effect=[None, {"mode": "remote-proxy"}],
+        ),
+        patch("subprocess.Popen") as popen,
+    ):
+        assert entrypoints._start_remote_proxy() is True
+
+    popen.assert_called_once()
+    command = popen.call_args.args[0]
+    assert "run_remote_proxy" in command[2]
+    assert "start_remote_proxy" not in command[2]
+
+
 def test_cli_logout_clears_auth(tmp_path: Path) -> None:
     """`vertex /logout` clears Firebase auth and prints confirmation."""
     import sys

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import signal
 import socketserver
 import threading
 from http import HTTPStatus
@@ -358,6 +359,27 @@ def start_remote_proxy(port: int = 8084) -> tuple[HTTPServer, threading.Thread]:
     )
 
     return _server, _server_thread
+
+
+def run_remote_proxy(port: int = 8084) -> None:
+    """Inicia o proxy remoto e mantém o processo vivo até receber sinal de parada."""
+    server, _thread = start_remote_proxy(port)
+
+    stop_event = threading.Event()
+
+    def _handle_stop(_signum: int, _frame: object) -> None:
+        stop_event.set()
+
+    previous_sigterm = signal.signal(signal.SIGTERM, _handle_stop)
+    previous_sigint = signal.signal(signal.SIGINT, _handle_stop)
+    try:
+        while not stop_event.is_set():
+            stop_event.wait(1)
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        signal.signal(signal.SIGINT, previous_sigint)
+        stop_remote_proxy()
+        server.server_close()
 
 
 def stop_remote_proxy() -> None:

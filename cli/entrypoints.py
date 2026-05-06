@@ -977,8 +977,8 @@ def _start_remote_proxy() -> bool:
         [
             sys.executable,
             "-c",
-            "from cli.remote_proxy import start_remote_proxy; "
-            f"start_remote_proxy(port={port})",
+            "from cli.remote_proxy import run_remote_proxy; "
+            f"run_remote_proxy(port={port})",
         ],
         env={**os.environ, "PORT": str(port)},
         stdout=subprocess.DEVNULL,
